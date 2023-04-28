@@ -26,6 +26,8 @@ public:
 	void Run();
 	HINSTANCE GetInstanceHandle() const;
 	HWND GetWindowHandle() const;
+	int GetWindowWidth()const;
+	int GetWindowHeight()const;
 	~Application();
 };
 

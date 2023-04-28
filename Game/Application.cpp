@@ -98,6 +98,16 @@ HWND Application::GetWindowHandle() const
 	return wHandle_;
 }
 
+int Application::GetWindowWidth() const
+{
+	return window_width;
+}
+
+int Application::GetWindowHeight() const
+{
+	return window_height;
+}
+
 Application::~Application()
 {
 	UnregisterClass(class_name, instance_);
