@@ -61,7 +61,7 @@ Application::Application()
 	assert(wHandle_ != NULL);
 
 	dx12_ = std::make_shared<DirectX12Wrapper>();
-	dx12_->Init();
+	dx12_->Init(this);
 }
 
 Application& Application::GetInstance()

@@ -14,7 +14,7 @@ DirectX12Wrapper::~DirectX12Wrapper()
 {
 }
 
-bool DirectX12Wrapper::Init()
+bool DirectX12Wrapper::Init(Application* app)
 {
 #ifdef _DEBUG
 	ComPtr<ID3D12Debug> debugLayer;
@@ -66,10 +66,23 @@ bool DirectX12Wrapper::Init()
 		return false;
 	}
 
-	const Application& app = Application::GetInstance();
+	//コマンドキューの作成
+	D3D12_COMMAND_QUEUE_DESC cmdQueDesc = {};
+	cmdQueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+	cmdQueDesc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
+	cmdQueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+	cmdQueDesc.NodeMask = 0;
+	dev_->CreateCommandQueue(&cmdQueDesc,IID_PPV_ARGS(cmdQue_.ReleaseAndGetAddressOf()));
+	assert(SUCCEEDED(result));
+	if (FAILED(result))
+	{
+		return false;
+	}
+
+
 	DXGI_SWAP_CHAIN_DESC1 scDesc = {};
-	scDesc.Width = app.GetWindowWidth();
-	scDesc.Height = app.GetWindowHeight();
+	scDesc.Width = app->GetWindowWidth();
+	scDesc.Height = app->GetWindowHeight();
 	scDesc.Stereo = false;//VRの時以外FALSE
 	scDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;//アルファは特にいじらない
 	scDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;//RGBA8bitの標準
@@ -84,8 +97,9 @@ bool DirectX12Wrapper::Init()
 
 
 	ComPtr<IDXGISwapChain1> swapChain;
-	result = dxgi_->CreateSwapChainForHwnd(dev_.Get(),
-		Application::GetInstance().GetWindowHandle(),
+	result = dxgi_->CreateSwapChainForHwnd(
+		cmdQue_.Get(),
+		app->GetWindowHandle(),
 		&scDesc,
 		nullptr,
 		nullptr,
@@ -93,5 +107,28 @@ bool DirectX12Wrapper::Init()
 	assert(SUCCEEDED(result));
 	result = swapChain.As(&swapChain_);
 	assert(SUCCEEDED(result));
+
+	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
+	rtvHeapDesc.NodeMask = 0;
+	rtvHeapDesc.NumDescriptors = 2;//画面をいくつ作るのか(表画面と裏画面)
+	rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;	//レンダーターゲットビューとして
+	rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+
+	result = dev_->CreateDescriptorHeap(&rtvHeapDesc, 
+		IID_PPV_ARGS(rtvHeaps_.ReleaseAndGetAddressOf()));
+
+	CD3DX12_CPU_DESCRIPTOR_HANDLE descHandle(rtvHeaps_->GetCPUDescriptorHandleForHeapStart(),
+		0, 0);
+	swapChain_->GetDesc1(&scDesc);
+	std::array<ID3D12Resource*, 2> renderTargetResources;
+	for (int i = 0; i < scDesc.BufferCount; i++)
+	{
+		result = swapChain_->GetBuffer(i, IID_PPV_ARGS(&renderTargetResources[i]));
+		dev_->CreateRenderTargetView(renderTargetResources[i],nullptr, descHandle);
+		descHandle.ptr += dev_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+	}
+
+	assert(SUCCEEDED(result));
+
 	return true;
 }
