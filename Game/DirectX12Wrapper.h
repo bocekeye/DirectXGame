@@ -13,12 +13,16 @@ private:
 	ComPtr<IDXGIFactory6> dxgi_;//DXGI
 	ComPtr<IDXGISwapChain4> swapChain_;	//スワップチェーン
 	ComPtr<ID3D12CommandQueue>cmdQue_;//コマンドキュー
+	ComPtr<ID3D12GraphicsCommandList> cmdList_;	//コマンドリスト
+	ComPtr<ID3D12CommandAllocator>	cmdAlloc_;	//コマンドアロケータ
 	ComPtr<ID3D12DescriptorHeap> rtvHeaps_;//レンダーターゲット用デスクリプタヒープ
+
 
 public:
 	DirectX12Wrapper();
 	~DirectX12Wrapper();
 
 	bool Init(Application* app);
+	bool Update();
 };
 

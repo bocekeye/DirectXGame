@@ -85,6 +85,7 @@ void Application::Run()
 		{
 			break;
 		}
+		dx12_->Update();
 	}
 }
 
