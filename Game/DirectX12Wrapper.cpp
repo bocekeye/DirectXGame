@@ -199,7 +199,7 @@ bool DirectX12Wrapper::Update()
 	cmdList_->OMSetRenderTargets(1, &heapStart,
 		false, nullptr);
 	//その時のレンダーターゲットのクリア
-	std::array<float, 4> clearColor = { 1.0f,0.1f,1.0f,1.0f };
+	std::array<float, 4> clearColor = { 0.1f,1.0f,0.1f,1.0f };
 	cmdList_->ClearRenderTargetView(heapStart, clearColor.data(),
 		0, nullptr);
 	cmdList_->Close();
