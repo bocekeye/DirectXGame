@@ -6,6 +6,7 @@
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "d3dcompiler.lib")
 
 using namespace DirectX;
 
@@ -238,9 +239,80 @@ bool DirectX12Wrapper::Init(Application* app)
 		D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION,
 		0,
 		vsBlob.ReleaseAndGetAddressOf(),nullptr);
+	assert(SUCCEEDED(result));
 
+	result = D3DCompileFromFile(L"PixelShader.hlsl",
+		nullptr, nullptr, "main", "ps_5_0",
+		D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION,
+		0,
+		psBlob.ReleaseAndGetAddressOf(), nullptr);
+	assert(SUCCEEDED(result));
 
+	//入力レイアウト
+	D3D12_INPUT_ELEMENT_DESC layoutDesc[] =
+	{
+		{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,D3D12_APPEND_ALIGNED_ELEMENT,
+														D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0}
 
+	};
+
+	//パイプラインオブジェクトを作る
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC ppDesc = {};
+	//頂点入力
+	//IA(InputAssembler)
+	ppDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	ppDesc.InputLayout.NumElements = _countof(layoutDesc);
+	ppDesc.InputLayout.pInputElementDescs = layoutDesc;
+
+	//頂点シェーダ VS(VertexShader)
+	ppDesc.VS.pShaderBytecode = vsBlob->GetBufferPointer();
+	ppDesc.VS.BytecodeLength = vsBlob->GetBufferSize();
+	//ラスタライザ
+	ppDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	//ピクセルシェーダ
+	ppDesc.PS.pShaderBytecode = psBlob->GetBufferPointer();
+	ppDesc.PS.BytecodeLength = psBlob->GetBufferSize();
+
+	//出力マージャー
+	ppDesc.NumRenderTargets = 1;							//レンダーターゲットの数
+	//これを設定してないと最終的にレンダーターゲットに書き込まれない
+	ppDesc.SampleMask = D3D12_DEFAULT_SAMPLE_MASK;			
+	ppDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);	//ブレンドステート
+	
+	ppDesc.NodeMask = 0;
+
+	ppDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+
+	D3D12_ROOT_PARAMETER rootParam = {};
+	rootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+	rootParam.DescriptorTable.NumDescriptorRanges = 1;
+
+	//ルートシグネチャ御抜け区とを作る
+	ComPtr <ID3DBlob> rootBlob;
+	D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
+	//頂点入力(頂点レイアウト)があるときはこれを使う
+	//頂点が入力されるということだけを教える設定
+	rsDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+	rsDesc.NumParameters = 0;
+
+	//ルートシグネチャ設定をBlobに書き込む
+	result = D3D12SerializeRootSignature(&rsDesc,D3D_ROOT_SIGNATURE_VERSION_1,
+			rootBlob.ReleaseAndGetAddressOf(),
+			nullptr);
+			assert(SUCCEEDED(result));
+	//このBlobを元に、RootSignature本体を作る
+	result = dev_->CreateRootSignature(0,	//nodeMaskなので、いつも0
+			rootBlob->GetBufferPointer(),	//ブロブのアドレス
+			rootBlob->GetBufferSize(),		//ブロブのサイズ
+			IID_PPV_ARGS(rootSig_.ReleaseAndGetAddressOf()));
+			assert(SUCCEEDED(result));
+			
+	ppDesc.pRootSignature = rootSig_.Get();
+	ppDesc.SampleDesc.Count = 1;
+	ppDesc.SampleDesc.Quality = 0;
+
+	result = dev_->CreateGraphicsPipelineState(&ppDesc, IID_PPV_ARGS(pipelineState_.ReleaseAndGetAddressOf()));
+	assert(SUCCEEDED(result));
 
 	return true;
 }
@@ -250,7 +322,7 @@ bool DirectX12Wrapper::Update()
 	static float red = 0.0f;
 
 	cmdAlloc_->Reset();
-	cmdList_->Reset(cmdAlloc_.Get(), nullptr);
+	cmdList_->Reset(cmdAlloc_.Get(), pipelineState_.Get());
 
 	//レンダーターゲットの指定
 	auto heapStart = rtvHeaps_->GetCPUDescriptorHandleForHeapStart();
@@ -272,16 +344,40 @@ bool DirectX12Wrapper::Update()
 	std::array<float, 4> clearColor = { red, 1.0f, 0.0f, 1.0f };
 	cmdList_->ClearRenderTargetView(heapStart, clearColor.data(), 0, nullptr);
 
+	//ルートシグネチャとパイプラインステートをセット
+	cmdList_->SetGraphicsRootSignature(rootSig_.Get());
+	cmdList_->SetPipelineState(pipelineState_.Get());
 	//頂点バッファをセットする
-	cmdList_->IASetVertexBuffers(0, 1, &vbView_);
+	cmdList_->IASetVertexBuffers(
+		0,			//スロット 
+		1,			//頂点バッファビュー配列の数
+		&vbView_);	//頂点バッファビュー本体
+
+	//プリミティブトポロジーの設定
+	cmdList_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	//どこに描画するのかを指定する
+	auto viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, 640.0f, 480.0f);
+	cmdList_->RSSetViewports(1,&viewport);
+	
+	D3D12_RECT rect = {};
+	rect.left = 0;
+	rect.top = 0;
+	rect.right = 640;
+	rect.bottom = 480;
+	cmdList_->RSSetScissorRects(1,&rect);
+
+	//三兆点を描画する
+	cmdList_->DrawInstanced(3,1,0,0);
 
 	auto afterBarrier = CD3DX12_RESOURCE_BARRIER::Transition(
 		rtvResources_[bbIdx],					//対象のソース(データの塊)
 		D3D12_RESOURCE_STATE_RENDER_TARGET,		//前の使い方
 		D3D12_RESOURCE_STATE_PRESENT			//後の使い方
 	);
-	cmdList_->ResourceBarrier(1, &afterBarrier);
 
+	cmdList_->ResourceBarrier(1, &afterBarrier);
+	
 	cmdList_->Close();	//コマンドは最後に、「必ず」クローズする
 
 	ID3D12CommandList* cmdlists[] = { cmdList_.Get() };
